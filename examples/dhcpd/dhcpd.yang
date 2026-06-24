@@ -1,0 +1,84 @@
+module dhcpd {
+
+  namespace "http://example.com/ns/dhcpd";
+  prefix dhcpd;
+
+  import ietf-inet-types {
+    prefix inet;
+  }
+
+  organization "pyconfd example";
+  description "DHCPd 設定モデル (pyconfd デモ用)";
+
+  revision 2024-01-01 {
+    description "Initial revision.";
+  }
+
+  typedef loglevel {
+    type enumeration {
+      enum kern;
+      enum mail;
+      enum local7;
+    }
+  }
+
+  container dhcp {
+    description "DHCP サーバー設定";
+
+    leaf default-lease-time {
+      type uint32;
+      default 600;
+      description "デフォルトリース時間 (秒)";
+    }
+
+    leaf max-lease-time {
+      type uint32;
+      default 7200;
+      description "最大リース時間 (秒)";
+    }
+
+    leaf log-facility {
+      type loglevel;
+      default local7;
+      description "ログファシリティ";
+    }
+
+    container subnets {
+      list subnet {
+        key "net mask";
+
+        leaf net {
+          type inet:ipv4-address;
+          description "ネットワークアドレス";
+        }
+
+        leaf mask {
+          type inet:ipv4-address;
+          description "サブネットマスク";
+        }
+
+        container range {
+          leaf low-addr {
+            type inet:ipv4-address;
+            description "範囲開始アドレス";
+          }
+          leaf hi-addr {
+            type inet:ipv4-address;
+            description "範囲終了アドレス";
+          }
+        }
+
+        leaf routers {
+          type string;
+          description "デフォルトゲートウェイ";
+        }
+
+        leaf max-lease-time {
+          type uint32;
+          default 7200;
+          description "サブネット最大リース時間 (秒)";
+        }
+      }
+    }
+  }
+}

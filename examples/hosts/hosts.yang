@@ -1,0 +1,73 @@
+module hosts {
+
+  namespace "http://example.com/ns/hosts";
+  prefix hosts;
+
+  import ietf-inet-types {
+    prefix inet;
+  }
+
+  organization "pyconfd example";
+  description
+    "ネットワークホストとインターフェース管理モデル。
+     ConfD examples.confd/intro/python/6-config/hst.yang を参考に
+     tailf 拡張を除いて pyconfd 向けに作成。";
+
+  revision 2024-01-01 {
+    description "Initial revision.";
+  }
+
+  container hosts {
+    description "ホスト一覧";
+
+    list host {
+      key "name";
+      description "ホストエントリ";
+
+      leaf name {
+        type string;
+        description "ホスト名";
+      }
+
+      leaf domain {
+        type string;
+        description "ドメイン名";
+      }
+
+      leaf defgw {
+        type inet:ipv4-address;
+        description "デフォルトゲートウェイ";
+      }
+
+      container interfaces {
+        description "インターフェース一覧";
+
+        list interface {
+          key "name";
+          description "ネットワークインターフェース";
+
+          leaf name {
+            type string;
+            description "インターフェース名 (例: eth0, eth1)";
+          }
+
+          leaf ip {
+            type inet:ipv4-address;
+            description "IPv4 アドレス";
+          }
+
+          leaf mask {
+            type inet:ipv4-address;
+            description "サブネットマスク";
+          }
+
+          leaf enabled {
+            type boolean;
+            default "true";
+            description "インターフェース有効/無効フラグ";
+          }
+        }
+      }
+    }
+  }
+}

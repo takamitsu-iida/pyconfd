@@ -1,0 +1,58 @@
+{
+  "hosts": {
+    "host": [
+      {
+        "name": "buzz",
+        "domain": "tail-f.com",
+        "defgw": "192.168.1.1",
+        "interfaces": {
+          "interface": [
+            {
+              "name": "eth0",
+              "ip": "192.168.1.61",
+              "mask": "255.255.255.0",
+              "enabled": true
+            },
+            {
+              "name": "eth1",
+              "ip": "10.77.1.44",
+              "mask": "255.255.0.0",
+              "enabled": true
+            }
+          ]
+        }
+      },
+      {
+        "name": "woody",
+        "domain": "tail-f.com",
+        "defgw": "10.0.0.1",
+        "interfaces": {
+          "interface": [
+            {
+              "name": "eth0",
+              "ip": "10.0.0.55",
+              "mask": "255.0.0.0",
+              "enabled": false
+            }
+          ]
+        }
+      },
+      {
+        "name": "iida-host",
+        "interfaces": {
+          "interface": [
+            {
+              "name": "eth0",
+              "ip": "1.1.1.1",
+              "mask": "255.255.255.255.255"
+            }
+          ]
+        }
+      },
+      {
+        "name": "iida",
+        "domain": "iida.com"
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+# Runtime dependencies
+asyncssh
+
+# Development dependencies
+pytest
+pytest-timeout

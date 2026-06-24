@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyconfd"
+version = "0.1.0"
+description = "Python implementation of ConfD-equivalent NETCONF/CDB/MAAPI"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-timeout"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyconfd*"]
