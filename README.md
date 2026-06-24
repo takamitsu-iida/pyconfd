@@ -46,7 +46,7 @@ pyconfd/
 ### インストール
 
 ```bash
-git clone https://github.com/your-org/pyconfd.git
+git clone https://github.com/takamitsu-iida/pyconfd.git
 cd pyconfd
 pip install -e .
 ```
@@ -60,7 +60,7 @@ cd examples/dhcpd
 python demo.py
 ```
 
-別ターミナルから NETCONF や CLI で接続することも可能です。
+別ターミナルから NETCONF や CLI で接続して動作を確認します。
 
 ```bash
 # NETCONF hello + get-config を手動で試す
@@ -250,14 +250,9 @@ admin@myrouter>
 
 | 項目 | ConfD | pyconfd |
 |------|-------|---------|
-| ライセンス | 商用 (Cisco) | MIT |
 | 実装言語 | C / Erlang | Python |
 | NETCONF transport | SSH / TCP | TCP のみ |
 | CLI | Cisco XR / Juniper スタイル | C-style / J-style (Telnet) |
 | `.fxs` コンパイル | 必要 (`confdc`) | 不要 (実行時パース) |
 | YANG 対応範囲 | 完全 | 主要構文のみ |
 | スケーラビリティ | 商用グレード | プロトタイプ相当 |
-
-## ライセンス
-
-MIT License
