@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YANG Model Visualizer</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      padding: 0 16px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+    }
+    .brand { display: flex; flex-direction: column; margin-right: 8px; flex-shrink: 0; }
+    .brand-title { font-size: 15px; font-weight: 700; color: #f1f5f9; }
+    .brand-sub   { font-size: 11px; color: #64748b; }
+
+    .module-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+    .module-tab {
+      padding: 5px 14px;
+      border-radius: 20px;
+      border: 1px solid #334155;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .module-tab:hover  { background: #334155; color: #e2e8f0; }
+    .module-tab.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+
+    .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .icon-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 5px 10px;
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .icon-btn:hover { background: #334155; color: #e2e8f0; }
+    .search-wrap { position: relative; display: flex; align-items: center; }
+    .search-wrap input {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 5px 10px 5px 30px;
+      color: #e2e8f0;
+      font-size: 13px;
+      width: 180px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .search-wrap input:focus { border-color: #3b82f6; }
+    .search-wrap .search-icon {
+      position: absolute;
+      left: 8px;
+      color: #475569;
+      font-size: 13px;
+      pointer-events: none;
+    }
+    .search-count { font-size: 12px; color: #64748b; min-width: 48px; }
+
+    /* ---- Main layout ---- */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ---- Tree area ---- */
+    #tree-container { flex: 1; overflow: hidden; position: relative; background: #0f172a; }
+    #tree-container svg { width: 100%; height: 100%; }
+    .tree-empty {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      color: #475569; font-size: 14px; text-align: center; pointer-events: none;
+    }
+
+    /* ---- Detail panel ---- */
+    .detail-panel {
+      width: 260px;
+      background: #1e293b;
+      border-left: 1px solid #334155;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+    .detail-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #334155;
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+    }
+    .detail-body { flex: 1; overflow-y: auto; padding: 16px; }
+    .detail-empty { color: #475569; font-size: 13px; text-align: center; margin-top: 32px; line-height: 1.8; }
+    .detail-name  { font-size: 18px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px; word-break: break-all; }
+    .detail-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .detail-desc  { font-size: 13px; color: #94a3b8; line-height: 1.7; margin-bottom: 14px; white-space: pre-wrap; }
+    .detail-props { display: flex; flex-direction: column; gap: 10px; }
+    .detail-prop  { display: flex; flex-direction: column; gap: 3px; }
+    .prop-label   { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .prop-value   {
+      font-size: 13px; color: #e2e8f0;
+      font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+      word-break: break-all;
+      background: #0f172a;
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid #334155;
+    }
+
+    /* ---- Legend ---- */
+    .legend {
+      padding: 8px 16px;
+      background: #1e293b;
+      border-top: 1px solid #334155;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #64748b; }
+    .legend-dot  { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ---- D3 styles ---- */
+    .node circle {
+      stroke-width: 2;
+      cursor: pointer;
+      transition: r 0.1s;
+    }
+    .node:hover circle { r: 9; }
+    .node text {
+      font-size: 12px;
+      fill: #cbd5e1;
+      pointer-events: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .node.selected circle { stroke-width: 3 !important; stroke: #fff !important; }
+    .node.selected text  { fill: #f1f5f9; font-weight: 700; }
+    .node.highlighted circle { stroke: #fbbf24 !important; stroke-width: 3; }
+    .node.highlighted text   { fill: #fbbf24; font-weight: 600; }
+    .node.dimmed text   { fill: #334155; }
+    .node.dimmed circle { opacity: 0.3; }
+    .link { fill: none; stroke: #1e3a5f; stroke-width: 1.5; }
+    .link.highlighted { stroke: #fbbf24; opacity: 0.6; }
+
+    /* ---- Tooltip ---- */
+    .tooltip {
+      position: fixed;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #e2e8f0;
+      pointer-events: none;
+      z-index: 200;
+      max-width: 240px;
+      display: none;
+      line-height: 1.6;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="brand-title">YANG Visualizer</span>
+    <span class="brand-sub">pyconfd スキーマ可視化</span>
+  </div>
+  <div class="module-tabs" id="module-tabs"></div>
+  <div class="header-actions">
+    <button class="icon-btn" id="btn-expand-all">全展開</button>
+    <button class="icon-btn" id="btn-collapse-all">全折畳</button>
+    <button class="icon-btn" id="btn-fit">画面合わせ</button>
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input type="text" id="search-input" placeholder="ノード検索...">
+    </div>
+    <span class="search-count" id="search-count"></span>
+  </div>
+</header>
+
+<div class="main">
+  <div id="tree-container">
+    <svg id="tree-svg"><g id="tree-root"></g></svg>
+    <div class="tree-empty" id="tree-empty">モジュールを選択してください</div>
+  </div>
+  <div class="detail-panel">
+    <div class="detail-header">ノード詳細</div>
+    <div class="detail-body" id="detail-body">
+      <div class="detail-empty" id="detail-empty">ノードをクリックすると<br>詳細が表示されます</div>
+      <div id="detail-content" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<div class="legend" id="legend"></div>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ============================================================
+// 定数
+// ============================================================
+const NODE_COLORS = {
+  module:       { fill: "#6366f1", stroke: "#818cf8" },
+  submodule:    { fill: "#6366f1", stroke: "#818cf8" },
+  container:    { fill: "#3b82f6", stroke: "#60a5fa" },
+  list:         { fill: "#10b981", stroke: "#34d399" },
+  leaf:         { fill: "#f59e0b", stroke: "#fbbf24" },
+  "leaf-list":  { fill: "#ef4444", stroke: "#f87171" },
+  choice:       { fill: "#8b5cf6", stroke: "#a78bfa" },
+  case:         { fill: "#a78bfa", stroke: "#c4b5fd" },
+  grouping:     { fill: "#06b6d4", stroke: "#22d3ee" },
+  uses:         { fill: "#0ea5e9", stroke: "#38bdf8" },
+  typedef:      { fill: "#14b8a6", stroke: "#2dd4bf" },
+  augment:      { fill: "#84cc16", stroke: "#a3e635" },
+  rpc:          { fill: "#f97316", stroke: "#fb923c" },
+  input:        { fill: "#64748b", stroke: "#94a3b8" },
+  output:       { fill: "#64748b", stroke: "#94a3b8" },
+  notification: { fill: "#ec4899", stroke: "#f472b6" },
+  anyxml:       { fill: "#78716c", stroke: "#a8a29e" },
+  anydata:      { fill: "#78716c", stroke: "#a8a29e" },
+};
+const DEFAULT_COLOR = { fill: "#475569", stroke: "#64748b" };
+
+const LEGEND_ITEMS = [
+  ["container",   "container"],
+  ["list",        "list"],
+  ["leaf",        "leaf"],
+  ["leaf-list",   "leaf-list"],
+  ["choice",      "choice/case"],
+  ["typedef",     "typedef"],
+  ["rpc",         "rpc"],
+  ["notification","notification"],
+  ["grouping",    "grouping/uses"],
+];
+
+// ============================================================
+// 状態
+// ============================================================
+let allData = {};
+let currentModule = null;
+let searchQuery = "";
+let matchedIds = new Set();
+let selectedId = null;
+
+// D3 オブジェクト
+let svgEl, gMain, gLink, gNode, rootNode;
+const treeLayout = d3.tree().nodeSize([26, 200]);
+const diagonal = d3.linkHorizontal().x(d => d.y).y(d => d.x);
+
+// ============================================================
+// 初期化
+// ============================================================
+async function init() {
+  const resp = await fetch("/api/schema");
+  if (!resp.ok) { console.error("スキーマ取得失敗"); return; }
+  const data = await resp.json();
+  allData = data.modules;
+
+  buildLegend();
+  buildTabs();
+  setupSvg();
+  setupButtons();
+
+  const first = Object.keys(allData)[0];
+  if (first) selectModule(first);
+}
+
+function buildLegend() {
+  const legend = document.getElementById("legend");
+  for (const [type, label] of LEGEND_ITEMS) {
+    const c = NODE_COLORS[type] || DEFAULT_COLOR;
+    const item = document.createElement("span");
+    item.className = "legend-item";
+    item.innerHTML =
+      `<span class="legend-dot" style="background:${c.fill};border:2px solid ${c.stroke}"></span>${label}`;
+    legend.appendChild(item);
+  }
+}
+
+function buildTabs() {
+  const tabs = document.getElementById("module-tabs");
+  for (const name of Object.keys(allData)) {
+    const btn = document.createElement("button");
+    btn.className = "module-tab";
+    btn.textContent = name;
+    btn.dataset.module = name;
+    btn.addEventListener("click", () => selectModule(name));
+    tabs.appendChild(btn);
+  }
+}
+
+function setupSvg() {
+  svgEl = d3.select("#tree-svg");
+  gMain = d3.select("#tree-root");
+
+  const zoom = d3.zoom()
+    .scaleExtent([0.05, 4])
+    .on("zoom", e => gMain.attr("transform", e.transform));
+  svgEl.call(zoom);
+
+  // zoom インスタンスを svg ノードに保存
+  svgEl.node().__zoom_behavior = zoom;
+}
+
+function setupButtons() {
+  document.getElementById("btn-expand-all").addEventListener("click", () => {
+    if (!rootNode) return;
+    rootNode.descendants().forEach(d => {
+      if (d._children) { d.children = d._children; d._children = null; }
+    });
+    update(rootNode);
+  });
+  document.getElementById("btn-collapse-all").addEventListener("click", () => {
+    if (!rootNode) return;
+    rootNode.descendants().forEach(d => {
+      if (d.depth > 0 && d.children) { d._children = d.children; d.children = null; }
+    });
+    update(rootNode);
+  });
+  document.getElementById("btn-fit").addEventListener("click", fitView);
+  document.getElementById("search-input").addEventListener("input", e => {
+    searchQuery = e.target.value.trim().toLowerCase();
+    if (currentModule) runSearch();
+  });
+}
+
+// ============================================================
+// モジュール選択
+// ============================================================
+function selectModule(name) {
+  currentModule = name;
+  document.querySelectorAll(".module-tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.module === name));
+  document.getElementById("tree-empty").style.display = "none";
+  selectedId = null;
+  clearDetail();
+  renderTree(allData[name]);
+}
+
+// ============================================================
+// 検索
+// ============================================================
+function collectMatches(node, ids = new Set()) {
+  if (!searchQuery) return ids;
+  const q = searchQuery;
+  if (node.name.toLowerCase().includes(q) ||
+      (node.description || "").toLowerCase().includes(q) ||
+      (node.data_type  || "").toLowerCase().includes(q)) {
+    ids.add(node.id);
+  }
+  for (const child of (node.children || [])) collectMatches(child, ids);
+  return ids;
+}
+
+function runSearch() {
+  matchedIds = collectMatches(allData[currentModule]);
+  const count = document.getElementById("search-count");
+  count.textContent = searchQuery ? `${matchedIds.size} 件` : "";
+
+  if (!rootNode) return;
+
+  // 一致したノードの祖先を展開する
+  if (searchQuery && matchedIds.size > 0) {
+    const matchedNodeObjs = rootNode.descendants().filter(d => matchedIds.has(d.data.id));
+    matchedNodeObjs.forEach(d => {
+      let cur = d.parent;
+      while (cur) {
+        if (cur._children) { cur.children = cur._children; cur._children = null; }
+        cur = cur.parent;
+      }
+    });
+    update(rootNode);
+  }
+
+  applyHighlight();
+}
+
+function applyHighlight() {
+  if (!gNode) return;
+  gNode.selectAll("g.node")
+    .classed("highlighted", d => searchQuery && matchedIds.has(d.data.id))
+    .classed("dimmed",      d => searchQuery && matchedIds.size > 0 && !matchedIds.has(d.data.id));
+}
+
+// ============================================================
+// D3 ツリー
+// ============================================================
+function renderTree(data) {
+  gMain.selectAll("*").remove();
+
+  rootNode = d3.hierarchy(data);
+  rootNode.x0 = 0;
+  rootNode.y0 = 0;
+
+  // ノードに一意 ID を付与
+  let uid = 0;
+  rootNode.descendants().forEach(d => {
+    d._uid = uid++;
+    d._children = d.children;
+    // 深さ 1 より先は折り畳んだ状態で開始
+    if (d.depth > 1) d.children = null;
+  });
+
+  gLink = gMain.append("g").attr("class", "links");
+  gNode = gMain.append("g").attr("class", "nodes");
+
+  update(rootNode);
+  fitView();
+}
+
+function update(source) {
+  const dur = 220;
+  treeLayout(rootNode);
+
+  const nodes = rootNode.descendants();
+  const links  = rootNode.links();
+
+  // ---------- ノード ----------
+  const node = gNode.selectAll("g.node")
+    .data(nodes, d => d._uid);
+
+  const enter = node.enter().append("g")
+    .attr("class", "node")
+    .attr("transform", `translate(${source.y0 ?? 0},${source.x0 ?? 0})`)
+    .on("click", (event, d) => {
+      event.stopPropagation();
+      toggleNode(d);
+      selectNode(d);
+    })
+    .on("mouseover", (e, d) => showTooltip(e, d.data))
+    .on("mouseout",  hideTooltip);
+
+  const color = d => NODE_COLORS[d.data.type] || DEFAULT_COLOR;
+
+  enter.append("circle")
+    .attr("r", 7)
+    .attr("fill",   d => color(d).fill)
+    .attr("stroke", d => color(d).stroke);
+
+  // 子あり・折り畳みインジケーター
+  enter.append("text")
+    .attr("class", "expand-marker")
+    .attr("dy", "0.35em")
+    .attr("x", 0)
+    .attr("text-anchor", "middle")
+    .style("font-size", "9px")
+    .style("fill", "#94a3b8")
+    .style("pointer-events", "none");
+
+  enter.append("text")
+    .attr("dy", "0.35em")
+    .attr("x",            d => (d.children || d._children) ? -12 : 12)
+    .attr("text-anchor",  d => (d.children || d._children) ? "end" : "start")
+    .text(d => d.data.name);
+
+  const merged = enter.merge(node);
+
+  merged.transition().duration(dur)
+    .attr("transform", d => `translate(${d.y},${d.x})`);
+
+  merged.select(".expand-marker")
+    .text(d => d._children && !d.children ? "+" : "");
+
+  merged.select("text:last-child")
+    .attr("x",           d => (d.children || d._children) ? -12 : 12)
+    .attr("text-anchor", d => (d.children || d._children) ? "end" : "start");
+
+  // 選択・ハイライト状態
+  merged
+    .classed("selected",     d => d.data.id === selectedId)
+    .classed("highlighted",  d => searchQuery && matchedIds.has(d.data.id))
+    .classed("dimmed",       d => searchQuery && matchedIds.size > 0 && !matchedIds.has(d.data.id));
+
+  node.exit()
+    .transition().duration(dur)
+    .attr("transform", `translate(${source.y},${source.x})`)
+    .remove();
+
+  // ---------- リンク ----------
+  const link = gLink.selectAll("path.link")
+    .data(links, d => d.target._uid);
+
+  link.enter().append("path")
+    .attr("class", "link")
+    .attr("d", () => {
+      const o = { x: source.x0 ?? 0, y: source.y0 ?? 0 };
+      return diagonal({ source: o, target: o });
+    })
+    .merge(link)
+    .transition().duration(dur)
+    .attr("d", diagonal);
+
+  link.exit()
+    .transition().duration(dur)
+    .attr("d", () => {
+      const o = { x: source.x, y: source.y };
+      return diagonal({ source: o, target: o });
+    })
+    .remove();
+
+  // 次の update のために座標を保存
+  nodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+}
+
+function toggleNode(d) {
+  if (d.children) {
+    d._children = d.children;
+    d.children  = null;
+  } else if (d._children) {
+    d.children  = d._children;
+    d._children = null;
+  }
+  update(d);
+}
+
+function selectNode(d) {
+  selectedId = d.data.id;
+  gNode.selectAll("g.node").classed("selected", n => n.data.id === selectedId);
+  showDetail(d.data);
+}
+
+// ============================================================
+// 画面フィット
+// ============================================================
+function fitView() {
+  if (!rootNode) return;
+  const container = document.getElementById("tree-container");
+  const W = container.clientWidth;
+  const H = container.clientHeight;
+
+  // 全ノードのバウンディングボックスを計算
+  const nodes = rootNode.descendants();
+  const xVals = nodes.map(d => d.y);  // 横
+  const yVals = nodes.map(d => d.x);  // 縦
+  const xMin = Math.min(...xVals);
+  const xMax = Math.max(...xVals);
+  const yMin = Math.min(...yVals);
+  const yMax = Math.max(...yVals);
+
+  const treeW = xMax - xMin || 1;
+  const treeH = yMax - yMin || 1;
+  const pad = 60;
+
+  const scale = Math.min((W - pad * 2) / treeW, (H - pad * 2) / treeH, 1.5);
+  const tx = (W - treeW * scale) / 2 - xMin * scale;
+  const ty = (H - treeH * scale) / 2 - yMin * scale;
+
+  const zoom = svgEl.node().__zoom_behavior;
+  svgEl.transition().duration(400)
+    .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}
+
+// ============================================================
+// ツールチップ
+// ============================================================
+const tooltip = document.getElementById("tooltip");
+
+function showTooltip(event, data) {
+  const c = NODE_COLORS[data.type] || DEFAULT_COLOR;
+  const badge = `<span style="color:${c.stroke};font-weight:700">${data.type}</span>`;
+  let html = `<strong style="color:#f1f5f9">${esc(data.name)}</strong>  ${badge}`;
+  if (data.data_type) html += `<br><span style="color:#64748b">型: ${esc(data.data_type)}</span>`;
+  if (data.keys && data.keys.length)
+    html += `<br><span style="color:#64748b">key: ${esc(data.keys.join(", "))}</span>`;
+  if (data.description) {
+    const desc = data.description.slice(0, 100);
+    html += `<br><span style="color:#64748b">${esc(desc)}${data.description.length > 100 ? "…" : ""}</span>`;
+  }
+  tooltip.innerHTML = html;
+  tooltip.style.display = "block";
+  tooltip.style.left = (event.clientX + 16) + "px";
+  tooltip.style.top  = (event.clientY - 10) + "px";
+}
+function hideTooltip() { tooltip.style.display = "none"; }
+
+// ============================================================
+// 詳細パネル
+// ============================================================
+function clearDetail() {
+  document.getElementById("detail-empty").style.display = "";
+  document.getElementById("detail-content").style.display = "none";
+}
+
+function showDetail(data) {
+  document.getElementById("detail-empty").style.display = "none";
+  const content = document.getElementById("detail-content");
+  content.style.display = "";
+  const c = NODE_COLORS[data.type] || DEFAULT_COLOR;
+
+  const props = [];
+  if (data.namespace) props.push(["namespace", data.namespace]);
+  if (data.prefix)    props.push(["prefix",    data.prefix]);
+  if (data.revision)  props.push(["revision",  data.revision]);
+  if (data.data_type) props.push(["type",      data.data_type]);
+  if (data.keys && data.keys.length)
+    props.push(["key", data.keys.join(", ")]);
+  if (data.mandatory) props.push(["mandatory", "true"]);
+  if (data.default !== undefined && data.default !== null)
+    props.push(["default", String(data.default)]);
+  if (data.enum && data.enum.length)
+    props.push(["enum", data.enum.join(" | ")]);
+  props.push(["path", data.id]);
+
+  content.innerHTML = `
+    <div class="detail-name">${esc(data.name)}</div>
+    <span class="detail-badge"
+          style="background:${c.fill}30;color:${c.stroke};border:1px solid ${c.fill}60">
+      ${data.type}
+    </span>
+    ${data.description
+      ? `<div class="detail-desc">${esc(data.description)}</div>`
+      : ""}
+    <div class="detail-props">
+      ${props.map(([k, v]) => `
+        <div class="detail-prop">
+          <span class="prop-label">${esc(k)}</span>
+          <span class="prop-value">${esc(v)}</span>
+        </div>`).join("")}
+    </div>
+  `;
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// ============================================================
+// 起動
+// ============================================================
+init();
+</script>
+</body>
+</html>
