@@ -291,18 +291,36 @@ class YangParser:
         if p == ";":
             self._next()
             if node is None and parent is not None and keyword is not None:
-                parent.properties[keyword] = arg or ""
+                # 'enum' ステートメントは複数あるためリストに追記する
+                if keyword == "enum":
+                    enum_list = parent.properties.get("enum", [])
+                    if not isinstance(enum_list, list):
+                        enum_list = [enum_list] if enum_list else []
+                    enum_list.append(arg or "")
+                    parent.properties["enum"] = enum_list
+                else:
+                    parent.properties[keyword] = arg or ""
             return node
 
         if p == "{":
             self._next()   # '{' を消費
             target = node if node is not None else parent
             # node がない場合 (revision など) は引数をプロパティとして親に保存する
+            # ただし 'enum' は後でリストに追記するためここでは書かない
             if node is None and parent is not None and keyword is not None and arg is not None:
-                parent.properties[keyword] = arg
+                if keyword != "enum":
+                    parent.properties[keyword] = arg
             while self._peek() not in ("}", None):
                 self._parse_stmt(target)
             self._next()   # '}' を消費
+            # ブロック付き enum ステートメント (enum <name> { ... }) の場合もリストに追記
+            if node is None and keyword == "enum" and parent is not None:
+                enum_list = parent.properties.get("enum", [])
+                if not isinstance(enum_list, list):
+                    enum_list = [enum_list] if enum_list else []
+                if arg and arg not in enum_list:
+                    enum_list.append(arg)
+                parent.properties["enum"] = enum_list
             return node
 
         # 引数もブロックもない場合
@@ -417,3 +435,250 @@ class YangSchemaRegistry:
     def __repr__(self) -> str:
         names = ", ".join(self._modules.keys())
         return f"YangSchemaRegistry([{names}])"
+
+
+# ---------------------------------------------------------------------------
+# 型バリデーション
+# ---------------------------------------------------------------------------
+
+import ipaddress as _ipaddress
+
+# YANG 組み込み整数型の範囲
+_INT_RANGES: Dict[str, tuple] = {
+    "int8":   (-128, 127),
+    "int16":  (-32768, 32767),
+    "int32":  (-2147483648, 2147483647),
+    "int64":  (-9223372036854775808, 9223372036854775807),
+    "uint8":  (0, 255),
+    "uint16": (0, 65535),
+    "uint32": (0, 4294967295),
+    "uint64": (0, 18446744073709551615),
+}
+
+
+def _resolve_typedef(type_name: str, module_node: Optional[YangNode]) -> Optional[YangNode]:
+    """
+    module_node の直下にある typedef を名前で検索して返す。
+    prefix 付き (prefix:name) の場合は prefix を除去して検索する。
+    """
+    if module_node is None:
+        return None
+    if ":" in type_name:
+        type_name = type_name.split(":", 1)[1]
+    for child in module_node.children:
+        if child.node_type == NodeType.TYPEDEF and child.name == type_name:
+            return child
+    return None
+
+
+def _get_enum_values(node: YangNode) -> List[str]:
+    """
+    YangNode (typedef または leaf) から有効な enum 値のリストを返す。
+    パーサーは properties["enum"] にリストで格納している。
+    """
+    raw = node.properties.get("enum", [])
+    if isinstance(raw, list):
+        return [str(v) for v in raw]
+    if raw:
+        return [str(raw)]
+    return []
+
+
+def _collect_enum_values(node: YangNode) -> List[str]:
+    """
+    leaf の type が enumeration のとき、その enum 値リストを返す。
+    """
+    return _get_enum_values(node)
+
+
+def _parse_range_constraint(range_str: str) -> List[tuple]:
+    """
+    YANG range 文字列 (例: "1..20 | 50..100" または "1..max") を
+    (min, max) タプルのリストに変換する。
+    """
+    segments = []
+    for part in range_str.split("|"):
+        part = part.strip()
+        if ".." in part:
+            lo_s, hi_s = part.split("..", 1)
+            lo_s, hi_s = lo_s.strip(), hi_s.strip()
+            lo = None if lo_s == "min" else int(lo_s)
+            hi = None if hi_s == "max" else int(hi_s)
+            segments.append((lo, hi))
+        else:
+            v = int(part.strip())
+            segments.append((v, v))
+    return segments
+
+
+def validate_value(value: Any, leaf_node: YangNode,
+                   module_node: Optional[YangNode] = None) -> Optional[str]:
+    """
+    value が leaf_node の YANG 型制約を満たすかを検査する。
+
+    Parameters
+    ----------
+    value       : セットしようとしている値 (Python 型)
+    leaf_node   : 対象の YangNode (LEAF または LEAF_LIST)
+    module_node : モジュールルートの YangNode (typedef 解決に使用)
+
+    Returns
+    -------
+    None        : バリデーション成功
+    str         : エラーメッセージ
+    """
+    type_name: str = leaf_node.properties.get("type", "string")
+
+    # --- typedef 解決 ---
+    typedef_node = _resolve_typedef(type_name, module_node)
+    if typedef_node is not None:
+        # typedef の実体型を取得
+        actual_type = typedef_node.properties.get("type", "string")
+        # enumeration の enum 値は typedef の properties["enum"] から収集
+        if actual_type == "enumeration":
+            enum_vals = _get_enum_values(typedef_node)
+            str_value = str(value)
+            if str_value not in enum_vals:
+                return f"値 {str_value!r} は型 {type_name} に含まれません (有効値: {', '.join(enum_vals)})"
+            return None
+        # typedef に range 制約がある場合
+        range_str = typedef_node.properties.get("range", "")
+        return _validate_builtin(actual_type, value, range_str, type_name)
+
+    # --- enumeration (直接定義) ---
+    if type_name == "enumeration":
+        enum_vals = _collect_enum_values(leaf_node)
+        if not enum_vals:
+            # enum 値を properties["enum_*"] から取得しようとする
+            enum_vals = [k[5:] for k in leaf_node.properties if k.startswith("enum_")]
+        str_value = str(value)
+        if str_value not in enum_vals:
+            return f"値 {str_value!r} は enumeration に含まれません (有効値: {', '.join(enum_vals)})"
+        return None
+
+    # --- range 制約 (leafレベルの type ブロック) ---
+    range_str = leaf_node.properties.get("range", "")
+    return _validate_builtin(type_name, value, range_str, type_name)
+
+
+def _validate_builtin(type_name: str, value: Any,
+                      range_str: str, display_name: str) -> Optional[str]:
+    """
+    YANG 組み込み型および ietf-inet-types の型チェックを行う。
+    """
+    str_value = str(value) if not isinstance(value, str) else value
+
+    # --- 整数型 ---
+    if type_name in _INT_RANGES:
+        lo, hi = _INT_RANGES[type_name]
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            try:
+                int_val = int(str_value)
+            except (ValueError, TypeError):
+                return f"値 {str_value!r} は {display_name} に変換できません (整数が必要です)"
+        else:
+            int_val = int(value)
+        if not (lo <= int_val <= hi):
+            return (f"値 {int_val} は {display_name} の範囲外です "
+                    f"({lo}..{hi})")
+        if range_str:
+            return _check_range_constraint(int_val, range_str, display_name)
+        return None
+
+    # --- decimal64 ---
+    if type_name == "decimal64":
+        try:
+            float(str_value)
+        except (ValueError, TypeError):
+            return f"値 {str_value!r} は {display_name} に変換できません (小数が必要です)"
+        return None
+
+    # --- boolean ---
+    if type_name == "boolean":
+        if str_value.lower() not in ("true", "false"):
+            return f"値 {str_value!r} は {display_name} に変換できません (true または false が必要です)"
+        return None
+
+    # --- empty ---
+    if type_name == "empty":
+        if str_value not in ("", "empty"):
+            return f"値 {str_value!r} は {display_name} に変換できません (empty 型は値なし)"
+        return None
+
+    # --- inet:ipv4-address ---
+    if type_name in ("inet:ipv4-address", "ipv4-address"):
+        try:
+            _ipaddress.IPv4Address(str_value)
+        except ValueError:
+            return f"値 {str_value!r} は有効な IPv4 アドレスではありません"
+        return None
+
+    # --- inet:ipv6-address ---
+    if type_name in ("inet:ipv6-address", "ipv6-address"):
+        try:
+            _ipaddress.IPv6Address(str_value)
+        except ValueError:
+            return f"値 {str_value!r} は有効な IPv6 アドレスではありません"
+        return None
+
+    # --- inet:ip-address ---
+    if type_name in ("inet:ip-address", "ip-address"):
+        try:
+            _ipaddress.ip_address(str_value)
+        except ValueError:
+            return f"値 {str_value!r} は有効な IP アドレスではありません"
+        return None
+
+    # --- inet:ipv4-prefix ---
+    if type_name in ("inet:ipv4-prefix", "ipv4-prefix"):
+        try:
+            _ipaddress.IPv4Network(str_value, strict=False)
+        except ValueError:
+            return f"値 {str_value!r} は有効な IPv4 プレフィックス (例: 192.168.1.0/24) ではありません"
+        return None
+
+    # --- inet:ipv6-prefix ---
+    if type_name in ("inet:ipv6-prefix", "ipv6-prefix"):
+        try:
+            _ipaddress.IPv6Network(str_value, strict=False)
+        except ValueError:
+            return f"値 {str_value!r} は有効な IPv6 プレフィックス ではありません"
+        return None
+
+    # --- inet:port-number ---
+    if type_name in ("inet:port-number", "port-number"):
+        try:
+            port = int(str_value)
+            if not (0 <= port <= 65535):
+                raise ValueError
+        except (ValueError, TypeError):
+            return f"値 {str_value!r} は有効なポート番号 (0..65535) ではありません"
+        return None
+
+    # --- string (range_str があれば長さ制約として扱う) ---
+    if type_name == "string":
+        if range_str:
+            return _check_range_constraint(len(str_value), range_str, display_name)
+        return None
+
+    # 未知の型はチェックしない (将来の拡張に対して寛容に)
+    return None
+
+
+def _check_range_constraint(int_val: int, range_str: str,
+                             display_name: str) -> Optional[str]:
+    """range 制約 (例: '1..20 | 50..100') に対して int_val を検査する"""
+    try:
+        segments = _parse_range_constraint(range_str)
+    except (ValueError, TypeError):
+        return None  # パース失敗は無視
+    for lo, hi in segments:
+        lo_ok = (lo is None) or (int_val >= lo)
+        hi_ok = (hi is None) or (int_val <= hi)
+        if lo_ok and hi_ok:
+            return None
+    ranges_desc = " | ".join(
+        f"{lo if lo is not None else 'min'}..{hi if hi is not None else 'max'}"
+        for lo, hi in segments
+    )
+    return f"値 {int_val} は {display_name} の range 制約外です ({ranges_desc})"

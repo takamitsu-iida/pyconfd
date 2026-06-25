@@ -50,6 +50,7 @@ from typing import Optional
 
 from .cdb import CDB
 from .maapi import MAAPI
+from .yang_parser import validate_value, NodeType as _NT
 
 log = logging.getLogger(__name__)
 
@@ -83,36 +84,60 @@ CRLF = b"\r\n"
 def _format_tree(tree, indent: int = 0, path_prefix: str = "", style: str = "j") -> str:
     """
     CDB の dict ツリーを設定テキスト形式に変換する。
-    style="c" (Cisco IOS): セミコロンなし、インデントのみ
-    style="j" (Juniper): セミコロンあり（デフォルト）
+    style="c" (Cisco IOS): ブレースなし、インデント + セクション末尾に "!"
+    style="j" (Juniper): ブレースあり、セミコロンあり（デフォルト）
     """
     lines = []
     pad = "  " * indent
-    suffix = "" if style == "c" else ";"
 
-    if isinstance(tree, dict):
-        for key, val in tree.items():
-            if isinstance(val, dict):
-                lines.append(f"{pad}{key} {{")
-                lines.append(_format_tree(val, indent + 1, style=style))
-                lines.append(f"{pad}}}")
-            elif isinstance(val, list):
-                for item in val:
-                    if isinstance(item, dict):
-                        # リストのキーを探してラベルにする
-                        label = _list_label(item)
-                        lines.append(f"{pad}{key}{' ' + label if label else ''} {{")
-                        lines.append(_format_tree(item, indent + 1, style=style))
-                        lines.append(f"{pad}}}")
-                    else:
-                        lines.append(f"{pad}{key} {item}{suffix}")
-            else:
-                lines.append(f"{pad}{key} {val}{suffix}")
-    elif isinstance(tree, list):
-        for item in tree:
-            lines.append(_format_tree(item, indent, style=style))
+    if style == "c":
+        if isinstance(tree, dict):
+            for key, val in tree.items():
+                if isinstance(val, dict):
+                    lines.append(f"{pad}{key}")
+                    lines.append(_format_tree(val, indent + 1, style=style))
+                    lines.append(f"{pad}!")
+                elif isinstance(val, list):
+                    for item in val:
+                        if isinstance(item, dict):
+                            label = _list_label(item)
+                            lines.append(f"{pad}{key}{' ' + label if label else ''}")
+                            lines.append(_format_tree(item, indent + 1, style=style))
+                            lines.append(f"{pad}!")
+                        else:
+                            lines.append(f"{pad}{key} {item}")
+                else:
+                    lines.append(f"{pad}{key} {val}")
+        elif isinstance(tree, list):
+            for item in tree:
+                lines.append(_format_tree(item, indent, style=style))
+        else:
+            lines.append(f"{pad}{tree}")
     else:
-        lines.append(f"{pad}{tree}{suffix}")
+        # J-style (Juniper)
+        if isinstance(tree, dict):
+            for key, val in tree.items():
+                if isinstance(val, dict):
+                    lines.append(f"{pad}{key} {{")
+                    lines.append(_format_tree(val, indent + 1, style=style))
+                    lines.append(f"{pad}}}")
+                elif isinstance(val, list):
+                    for item in val:
+                        if isinstance(item, dict):
+                            label = _list_label(item)
+                            lines.append(f"{pad}{key}{' ' + label if label else ''} {{")
+                            lines.append(_format_tree(item, indent + 1, style=style))
+                            lines.append(f"{pad}}}")
+                        else:
+                            lines.append(f"{pad}{key} {item};")
+                else:
+                    lines.append(f"{pad}{key} {val};")
+        elif isinstance(tree, list):
+            for item in tree:
+                lines.append(_format_tree(item, indent, style=style))
+        else:
+            lines.append(f"{pad}{tree};")
+
     return "\n".join(lines)
 
 
@@ -478,6 +503,10 @@ class CLISession:
                         self._write("% 値が必要です\r\n".encode())
                         return
                     value = _coerce_value(" ".join(value_tokens))
+                    err = self._validate_leaf_value(child_schema, value)
+                    if err:
+                        self._write(f"% Value error: {err}\r\n".encode())
+                        return
                     path = (current_abs + "/" + node_name).lstrip("/")
                     try:
                         self._cdb.set("/" + path, value, datastore="candidate")
@@ -641,6 +670,13 @@ class CLISession:
         value = " ".join(tokens[2:])
         # 数値変換を試みる
         value = _coerce_value(value)
+        # スキーマが利用可能な場合は型バリデーション
+        leaf_schema = self._schema_node_by_abs_path(path)
+        if leaf_schema is not None:
+            err = self._validate_leaf_value(leaf_schema, value)
+            if err:
+                self._write(f"% Value error: {err}\r\n".encode())
+                return
         try:
             self._cdb.set(path, value, datastore="candidate")
             self._write(b"[ok]\r\n")
@@ -744,6 +780,48 @@ class CLISession:
             self._active = False
 
     # ---- スキーマナビゲーション ----
+
+    def _module_node(self):
+        """_schema が YangSchemaRegistry の場合は最初のモジュールを返す"""
+        if self._schema is None:
+            return None
+        # YangNode (module) が直接渡されているケース
+        from .yang_parser import NodeType as NT
+        if hasattr(self._schema, 'node_type') and self._schema.node_type == NT.MODULE:
+            return self._schema
+        # YangSchemaRegistry が渡されているケース
+        if hasattr(self._schema, 'all_modules'):
+            mods = self._schema.all_modules()
+            return mods[0] if mods else None
+        return None
+
+    def _validate_leaf_value(self, leaf_node, value) -> Optional[str]:
+        """leaf_node の型制約に対して value を検証し、エラーメッセージを返す (正常時 None)"""
+        if leaf_node is None:
+            return None
+        if leaf_node.node_type not in (_NT.LEAF, _NT.LEAF_LIST):
+            return None
+        module_node = self._module_node()
+        return validate_value(value, leaf_node, module_node)
+
+    def _schema_node_by_abs_path(self, path: str):
+        """'/a/b/c' 形式の絶対パスから対応するスキーマノードを返す"""
+        if self._schema is None:
+            return None
+        module_node = self._module_node()
+        if module_node is None:
+            return None
+        parts = [p for p in path.strip("/").split("/") if p]
+        node = module_node
+        for part in parts:
+            name = part.split("[", 1)[0]
+            if ":" in name:
+                name = name.split(":", 1)[1]
+            child = node.get_child(name)
+            if child is None:
+                return None
+            node = child
+        return node
 
     def _schema_node_at(self, path_segs: list):
         """_config_path のセグメントリストをたどり、対応する YangNode を返す"""
