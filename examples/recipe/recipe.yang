@@ -1,0 +1,160 @@
+module recipe {
+
+  namespace "http://example.com/ns/recipe";
+  prefix recipe;
+
+  organization "pyconfd example";
+  description
+    "料理レシピ管理モデル (pyconfd チュートリアル用)
+
+     このモデルは YANG の主要機能を日常的なドメインで示します:
+       - typedef による列挙型の再利用
+       - uint32 の range 制約によるバリデーション
+       - boolean の default 値
+       - list のネスト (recipe > ingredients, recipe > steps)
+     ";
+
+  revision 2024-01-01 {
+    description "Initial revision.";
+  }
+
+  // ------------------------------------------------------------------
+  // typedef: 再利用可能な型定義
+  // ------------------------------------------------------------------
+
+  typedef difficulty {
+    type enumeration {
+      enum easy   { description "簡単"; }
+      enum medium { description "普通"; }
+      enum hard   { description "難しい"; }
+    }
+    description "調理難易度";
+  }
+
+  typedef cuisine-type {
+    type enumeration {
+      enum japanese { description "和食"; }
+      enum italian  { description "イタリアン"; }
+      enum chinese  { description "中華"; }
+      enum french   { description "フレンチ"; }
+      enum other    { description "その他"; }
+    }
+    description "料理のジャンル";
+  }
+
+  // ------------------------------------------------------------------
+  // トップレベルコンテナ
+  // ------------------------------------------------------------------
+
+  container recipes {
+    description "レシピコレクション";
+
+    // ------------------------------------------------------------------
+    // レシピ一覧 (list)
+    // ------------------------------------------------------------------
+
+    list recipe {
+      key "name";
+      description "レシピエントリ。name をキーとして識別する。";
+
+      leaf name {
+        type string;
+        description "レシピ名 (一意)";
+      }
+
+      leaf cuisine {
+        type cuisine-type;
+        default other;
+        description "料理のジャンル";
+      }
+
+      leaf difficulty {
+        type difficulty;
+        default easy;
+        description "調理難易度";
+      }
+
+      leaf servings {
+        type uint32 {
+          range "1..20";
+        }
+        default 2;
+        description "何人前 (1〜20 の範囲)";
+      }
+
+      leaf prep-time {
+        type uint32;
+        description "下準備時間 (分)";
+      }
+
+      leaf cook-time {
+        type uint32;
+        description "調理時間 (分)";
+      }
+
+      leaf calories {
+        type uint32;
+        description "1人前あたりのカロリー (kcal)";
+      }
+
+      leaf description {
+        type string;
+        description "レシピの概要説明";
+      }
+
+      // ----------------------------------------------------------------
+      // 材料リスト (nested list)
+      // ----------------------------------------------------------------
+
+      container ingredients {
+        description "材料リスト";
+
+        list ingredient {
+          key "name";
+          description "材料エントリ";
+
+          leaf name {
+            type string;
+            description "材料名";
+          }
+
+          leaf amount {
+            type string;
+            description "分量 (例: 200g、大さじ1、適量)";
+          }
+
+          leaf optional {
+            type boolean;
+            default false;
+            description "省略可能な材料かどうか";
+          }
+        }
+      }
+
+      // ----------------------------------------------------------------
+      // 調理手順 (nested list)
+      // ----------------------------------------------------------------
+
+      container steps {
+        description "調理手順リスト";
+
+        list step {
+          key "order";
+          description "手順エントリ。order (番号) で識別する。";
+
+          leaf order {
+            type uint32 {
+              range "1..100";
+            }
+            description "手順番号 (1 始まり)";
+          }
+
+          leaf instruction {
+            type string;
+            description "手順の説明文";
+          }
+        }
+      }
+    }
+  }
+}

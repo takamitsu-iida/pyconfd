@@ -5,8 +5,8 @@ ConfD の NETCONF インターフェースに相当する TCP ベースの NETCO
 
 対応オペレーション:
   <hello>
-  <get>
-  <get-config>
+  <get>           -- subtree / xpath(subtree のみ) フィルター対応
+  <get-config>    -- subtree フィルター対応
   <edit-config>
   <commit>
   <discard-changes>
@@ -17,6 +17,11 @@ ConfD の NETCONF インターフェースに相当する TCP ベースの NETCO
 
 フレーミング: NETCONF 1.0 (メッセージ区切り ]]>]]>) および
               NETCONF 1.1 (チャンク: #<N>\\n ... ##\\n)
+
+Subtree フィルター (RFC 6241 section 6.4):
+  選択ノード   — 子要素・テキストなし → 対応するサブツリー全体を選択
+  内容マッチ  — 子要素なし・テキストあり → 値でマッチ，成功時は親コンテナ全体を返す
+  包含ノード   — 子要素あり → 再帰的にフィルタリング
 """
 
 import logging
@@ -26,7 +31,7 @@ import socket
 import threading
 import traceback
 import xml.etree.ElementTree as ET
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .cdb import CDB
 from .maapi import MAAPI
@@ -123,6 +128,142 @@ def _xml_to_dict(elem) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Subtree フィルター (RFC 6241 section 6.4)
+# ---------------------------------------------------------------------------
+
+def _local(tag: str) -> str:
+    """'{ns}local' または 'prefix:local' からローカル名のみを返す"""
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    if ":" in tag:
+        return tag.split(":", 1)[1]
+    return tag
+
+
+def _extract_filter(op_elem) -> Tuple[Optional[object], str]:
+    """
+    <get> / <get-config> の子要素から <filter> 要素とその型を取り出す。
+
+    Returns
+    -------
+    (filter_elem, filter_type)
+        filter_elem  -- ET.Element または None (フィルターなし)
+        filter_type  -- "subtree" または "xpath"
+    """
+    filt = op_elem.find("{%s}filter" % NS_MSGS)
+    if filt is None:
+        filt = op_elem.find("filter")
+    if filt is None:
+        return None, "subtree"
+    ftype = filt.get("type", "subtree").lower()
+    return filt, ftype
+
+
+def _apply_subtree_filter(data: dict, filter_elem) -> Optional[dict]:
+    """
+    RFC 6241 section 6.4 subtree フィルターを data dict に適用する。
+
+    Rules
+    -----
+    - 選択ノード (children なし・テキストなし):
+        対応する data サブツリーをそのまま包含する。
+    - 内容マッチノード (children なし・テキストあり):
+        値が一致する場合は親コンテナ全体を返す。不一致なら None。
+    - 包含ノード (children あり):
+        対応する data 値に対して再帰フィルタリングする。
+
+    Returns
+    -------
+    フィルタリング後の dict。マッチしない場合は None。
+    """
+    content_matches: List[Tuple[str, str]] = []
+    containment_nodes: List[Tuple[str, object]] = []
+    selection_nodes: List[str] = []
+
+    for fchild in filter_elem:
+        fname = _local(fchild.tag)
+        has_children = len(fchild) > 0
+        has_text = bool(fchild.text and fchild.text.strip())
+
+        if has_text and not has_children:
+            content_matches.append((fname, fchild.text.strip()))
+        elif has_children:
+            containment_nodes.append((fname, fchild))
+        else:
+            selection_nodes.append(fname)
+
+    # 内容マッチノード: 全てが一致する場合のみ親全体を返す
+    for fname, expected in content_matches:
+        if fname not in data:
+            return None
+        actual = data[fname]
+        if isinstance(actual, list):
+            if not any(str(item) == expected for item in actual):
+                return None
+        elif str(actual) != expected:
+            return None
+
+    # 内容マッチ成功または内容マッチなし → 結果を構築
+    result: dict = {}
+
+    # 内容マッチノードは常に結果に含める
+    for fname, _ in content_matches:
+        if fname in data:
+            result[fname] = data[fname]
+
+    if selection_nodes:
+        for fname in selection_nodes:
+            if fname in data:
+                result[fname] = data[fname]
+
+    for fname, fchild in containment_nodes:
+        if fname not in data:
+            continue
+        dval = data[fname]
+        if isinstance(dval, dict):
+            sub = _apply_subtree_filter(dval, fchild)
+            if sub is not None:
+                result[fname] = sub
+        elif isinstance(dval, list):
+            filtered: List = []
+            for item in dval:
+                if isinstance(item, dict):
+                    sub = _apply_subtree_filter(item, fchild)
+                    if sub is not None:
+                        filtered.append(sub)
+                else:
+                    filtered.append(item)
+            if filtered:
+                result[fname] = filtered
+        else:
+            result[fname] = dval
+
+    # 選択ノードまたは包含ノードがない場合: 内容マッチのみ → 親全体を返す
+    if not selection_nodes and not containment_nodes:
+        return dict(data)
+
+    return result if result else None
+
+
+def _filter_data(data: dict, filter_elem, filter_type: str) -> dict:
+    """
+    filter_elem をデータ dict に適用して結果を返す。
+    filter_elem が None (フィルター指定なし) の場合は data をそのまま返す。
+    """
+    if filter_elem is None:
+        return data
+    if filter_type != "subtree":
+        # xpath は未対応: フィルターなしとして全体を返す
+        log.warning("xpath filter は未対応です。subtree にフィルバックします。")
+        return data
+    # filter_elem 直下の子要素がない = フィルターは空 → 空の data を返す
+    if len(filter_elem) == 0:
+        return {}
+    result = _apply_subtree_filter(data, filter_elem)
+    return result if result is not None else {}
+
+
+# ---------------------------------------------------------------------------
 # セッションハンドラー
 # ---------------------------------------------------------------------------
 
@@ -132,7 +273,7 @@ class NetconfSession:
     _next_session_id = 1
     _id_lock = threading.Lock()
 
-    def __init__(self, conn: socket.socket, addr, cdb: CDB, extra_caps=None):
+    def __init__(self, conn: socket.socket, addr, cdb: CDB, extra_caps=None, schema_registry=None, scenario_matcher=None):
         with NetconfSession._id_lock:
             self.session_id = NetconfSession._next_session_id
             NetconfSession._next_session_id += 1
@@ -144,9 +285,11 @@ class NetconfSession:
         self._buf = b""
         self._locked: Optional[str] = None  # ロックしているデータストア
         self._use_chunked = False            # NETCONF 1.1 チャンクモード
-        self._caps = list(BASE_CAPS) + (extra_caps or [])
+        schema_caps = schema_registry.capability_uris() if schema_registry is not None else []
+        self._caps = list(BASE_CAPS) + (extra_caps or []) + schema_caps
         self._active = True
         self._trans_open = False
+        self._scenario_matcher = scenario_matcher  # Optional[ScenarioMatcher]
 
     def run(self):
         try:
@@ -324,6 +467,26 @@ class NetconfSession:
 
     # ---- 各オペレーション ----
 
+    def _try_scenario(
+        self,
+        operation: str,
+        msg_id: str,
+        source: Optional[str] = None,
+        filter_elem=None,
+    ) -> bool:
+        """
+        シナリオマッチャを試みる。
+        マッチした場合は固定応答を送信して True を返す。
+        マッチなしまたはマッチャ未設定の場合は False を返す。
+        """
+        if self._scenario_matcher is None:
+            return False
+        body = self._scenario_matcher.match(operation, source=source, filter_elem=filter_elem)
+        if body is None:
+            return False
+        self._send_reply(_rpc_reply(msg_id, body))
+        return True
+
     def _op_get_config(self, msg_id: str, elem):
         source = "running"
         src_elem = elem.find(".//{%s}source" % NS_MSGS)
@@ -335,7 +498,11 @@ class NetconfSession:
                 source = src_local
                 break
 
+        filt_elem, filt_type = _extract_filter(elem)
+        if self._try_scenario("get-config", msg_id, source=source, filter_elem=filt_elem):
+            return
         data = self._cdb.subtree("/", datastore=source)
+        data = _filter_data(data, filt_elem, filt_type)
         data_xml = _dict_to_xml(data, "data", ns=NS_MSGS)
         self._send_reply(_rpc_reply(msg_id, f"  {data_xml}"))
 
@@ -343,8 +510,11 @@ class NetconfSession:
         # operational + running を合成して返す
         data = self._cdb.subtree("/", datastore="running")
         op_data = self._cdb.subtree("/", datastore="operational")
-        # 単純マージ
         data.update(op_data)
+        filt_elem, filt_type = _extract_filter(elem)
+        if self._try_scenario("get", msg_id, filter_elem=filt_elem):
+            return
+        data = _filter_data(data, filt_elem, filt_type)
         data_xml = _dict_to_xml(data, "data", ns=NS_MSGS)
         self._send_reply(_rpc_reply(msg_id, f"  {data_xml}"))
 
@@ -359,6 +529,9 @@ class NetconfSession:
                 tgt_local = child.tag.split("}", 1)[-1] if "}" in child.tag else child.tag
                 target = tgt_local
                 break
+
+        if self._try_scenario("edit-config", msg_id, source=target):
+            return
 
         config_elem = elem.find(".//{%s}config" % NS_MSGS)
         if config_elem is None:
@@ -429,6 +602,8 @@ class NetconfSession:
         self._send_reply(_ok_reply(msg_id))
 
     def _op_validate(self, msg_id: str, elem):
+        if self._try_scenario("validate", msg_id):
+            return
         self._send_reply(_ok_reply(msg_id))
 
 
@@ -455,11 +630,15 @@ class NetconfServer:
         host: str = "127.0.0.1",
         port: int = 2022,
         extra_caps=None,
+        schema_registry=None,
+        scenario_matcher=None,
     ):
         self._cdb = cdb
         self._host = host
         self._port = port
         self._extra_caps = extra_caps or []
+        self._schema_registry = schema_registry
+        self._scenario_matcher = scenario_matcher
         self._server_sock: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -493,7 +672,7 @@ class NetconfServer:
                     continue
                 conn, addr = self._server_sock.accept()
                 log.info("NETCONF 接続: %s", addr)
-                sess = NetconfSession(conn, addr, self._cdb, self._extra_caps)
+                sess = NetconfSession(conn, addr, self._cdb, self._extra_caps, self._schema_registry, self._scenario_matcher)
                 t = threading.Thread(
                     target=sess.run, daemon=True,
                     name=f"netconf-session-{sess.session_id}"

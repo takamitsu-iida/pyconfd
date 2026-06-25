@@ -1,5 +1,6 @@
 # Runtime dependencies
 asyncssh
+pyyaml          # YAML シナリオファイルの読み込みに使用 (省略可: JSON なら不要)
 
 # Development dependencies
 pytest

@@ -1,0 +1,85 @@
+# pyconfd モックシナリオ定義 (dhcpd サンプル)
+#
+# このファイルは ScenarioMatcher.from_file() で読み込みます。
+# シナリオは定義順に評価され、最初にマッチしたものが使われます。
+#
+# match フィールド:
+#   operation   : get / get-config / edit-config / validate / * (ワイルドカード)
+#   source      : running / candidate (省略可: 任意にマッチ)
+#   filter_tag  : filter XML に含まれるタグ名でフィルタリング (省略可)
+#
+# response フィールド (いずれか1つ):
+#   ok: true          → <ok/> を返す
+#   body: |           → インライン XML ボディ
+#   file: path.xml    → このファイルからの相対パスで XML ファイルを読み込む
+
+scenarios:
+
+  # ------------------------------------------------------------------
+  # 1. get-config running で dhcp タグを含むフィルターが来た場合
+  #    → 固定の DHCP 設定 XML を返す (CDB を参照しない)
+  # ------------------------------------------------------------------
+  - name: "mock: get-config running filter=dhcp"
+    match:
+      operation: get-config
+      source: running
+      filter_tag: dhcp
+    response:
+      body: |
+        <data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+          <dhcp xmlns="http://example.com/ns/dhcpd">
+            <default-lease-time>600</default-lease-time>
+            <max-lease-time>7200</max-lease-time>
+            <log-facility>local7</log-facility>
+            <subnets>
+              <subnet>
+                <net>192.168.1.0</net>
+                <mask>255.255.255.0</mask>
+                <range>
+                  <low-addr>192.168.1.10</low-addr>
+                  <hi-addr>192.168.1.100</hi-addr>
+                </range>
+                <routers>192.168.1.1</routers>
+                <max-lease-time>3600</max-lease-time>
+              </subnet>
+              <subnet>
+                <net>10.0.0.0</net>
+                <mask>255.0.0.0</mask>
+                <range>
+                  <low-addr>10.0.0.100</low-addr>
+                  <hi-addr>10.0.0.200</hi-addr>
+                </range>
+                <routers>10.0.0.1</routers>
+              </subnet>
+            </subnets>
+          </dhcp>
+        </data>
+
+  # ------------------------------------------------------------------
+  # 2. edit-config は常に <ok/> を返す (書き込み操作を無視するモック)
+  # ------------------------------------------------------------------
+  - name: "mock: edit-config always ok"
+    match:
+      operation: edit-config
+    response:
+      ok: true
+
+  # ------------------------------------------------------------------
+  # 3. validate は常に <ok/>
+  # ------------------------------------------------------------------
+  - name: "mock: validate always ok"
+    match:
+      operation: validate
+    response:
+      ok: true
+
+  # ------------------------------------------------------------------
+  # 4. 外部ファイルからレスポンスを読み込む例 (デフォルト無効)
+  #    responses/custom_get.xml が存在する場合に有効化してください
+  # ------------------------------------------------------------------
+  - name: "mock: get from file (disabled example)"
+    disabled: true
+    match:
+      operation: get
+    response:
+      file: responses/custom_get.xml

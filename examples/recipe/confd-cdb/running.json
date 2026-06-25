@@ -1,0 +1,220 @@
+{
+  "recipes": {
+    "recipe": [
+      {
+        "name": "カルボナーラ",
+        "cuisine": "italian",
+        "difficulty": "medium",
+        "servings": 2,
+        "prep-time": 10,
+        "cook-time": 15,
+        "calories": 650,
+        "description": "卵とチーズのクリーミーなパスタ。生クリームは使わない本格レシピ。",
+        "ingredients": {
+          "ingredient": [
+            {
+              "name": "スパゲッティ",
+              "amount": "200g",
+              "optional": false
+            },
+            {
+              "name": "パンチェッタ",
+              "amount": "80g",
+              "optional": false
+            },
+            {
+              "name": "卵",
+              "amount": "2個",
+              "optional": false
+            },
+            {
+              "name": "パルミジャーノ",
+              "amount": "60g",
+              "optional": false
+            },
+            {
+              "name": "黒こしょう",
+              "amount": "たっぷり",
+              "optional": false
+            },
+            {
+              "name": "塩",
+              "amount": "適量",
+              "optional": false
+            }
+          ]
+        },
+        "steps": {
+          "step": [
+            {
+              "order": 1,
+              "instruction": "たっぷりの湯を沸かし、塩を加えてスパゲッティを茹でる。"
+            },
+            {
+              "order": 2,
+              "instruction": "パンチェッタを短冊切りにしてフライパンで炒め、脂を出す。"
+            },
+            {
+              "order": 3,
+              "instruction": "ボウルに卵とパルミジャーノをよく混ぜ、黒こしょうを加える。"
+            },
+            {
+              "order": 4,
+              "instruction": "茹で上がったパスタをフライパンに移し、火を止める。"
+            },
+            {
+              "order": 5,
+              "instruction": "卵液を加えて手早く和え、茹で汁で濃度を調整して完成。"
+            }
+          ]
+        }
+      },
+      {
+        "name": "豚汁",
+        "cuisine": "japanese",
+        "difficulty": "easy",
+        "servings": 4,
+        "prep-time": 15,
+        "cook-time": 20,
+        "calories": 180,
+        "description": "根菜たっぷりの体が温まる味噌汁。",
+        "ingredients": {
+          "ingredient": [
+            {
+              "name": "豚バラ肉",
+              "amount": "150g",
+              "optional": false
+            },
+            {
+              "name": "大根",
+              "amount": "1/4本",
+              "optional": false
+            },
+            {
+              "name": "にんじん",
+              "amount": "1/2本",
+              "optional": false
+            },
+            {
+              "name": "ごぼう",
+              "amount": "1/2本",
+              "optional": false
+            },
+            {
+              "name": "こんにゃく",
+              "amount": "1/2枚",
+              "optional": true
+            },
+            {
+              "name": "みそ",
+              "amount": "大さじ3",
+              "optional": false
+            },
+            {
+              "name": "だし汁",
+              "amount": "800ml",
+              "optional": false
+            },
+            {
+              "name": "ごま油",
+              "amount": "小さじ1",
+              "optional": true
+            }
+          ]
+        },
+        "steps": {
+          "step": [
+            {
+              "order": 1,
+              "instruction": "豚肉は一口大、根菜は乱切りにする。"
+            },
+            {
+              "order": 2,
+              "instruction": "鍋にごま油を熱し、豚肉を炒めて色が変わったら根菜を加える。"
+            },
+            {
+              "order": 3,
+              "instruction": "だし汁を注いで沸騰させ、アクを取りながら野菜が柔らかくなるまで煮る。"
+            },
+            {
+              "order": 4,
+              "instruction": "火を弱め、みそを溶き入れて完成。"
+            }
+          ]
+        }
+      },
+      {
+        "name": "麻婆豆腐",
+        "cuisine": "chinese",
+        "difficulty": "medium",
+        "servings": 3,
+        "prep-time": 10,
+        "cook-time": 15,
+        "calories": 280,
+        "description": "花椒と豆板醤がきいた本格四川風。辛さはお好みで。",
+        "ingredients": {
+          "ingredient": [
+            {
+              "name": "木綿豆腐",
+              "amount": "1丁",
+              "optional": false
+            },
+            {
+              "name": "豚ひき肉",
+              "amount": "100g",
+              "optional": false
+            },
+            {
+              "name": "豆板醤",
+              "amount": "大さじ1",
+              "optional": false
+            },
+            {
+              "name": "甜麺醤",
+              "amount": "大さじ1",
+              "optional": false
+            },
+            {
+              "name": "花椒",
+              "amount": "小さじ1",
+              "optional": true
+            },
+            {
+              "name": "鶏がらスープ",
+              "amount": "150ml",
+              "optional": false
+            },
+            {
+              "name": "水溶き片栗粉",
+              "amount": "適量",
+              "optional": false
+            }
+          ]
+        },
+        "steps": {
+          "step": [
+            {
+              "order": 1,
+              "instruction": "豆腐は2cm角に切り、塩を入れた湯でさっと茹でる。"
+            },
+            {
+              "order": 2,
+              "instruction": "フライパンで豚ひき肉を炒め、豆板醤・甜麺醤を加えて香りを出す。"
+            },
+            {
+              "order": 3,
+              "instruction": "鶏がらスープを加えて煮立て、豆腐を入れて2〜3分煮る。"
+            },
+            {
+              "order": 4,
+              "instruction": "水溶き片栗粉でとろみをつけ、花椒を振って完成。"
+            }
+          ]
+        }
+      },
+      {
+        "name": "オムライス"
+      }
+    ]
+  }
+}

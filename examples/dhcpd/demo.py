@@ -25,11 +25,13 @@ import logging
 # パッケージパスの設定
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from pyconfd.yang_parser import load_yang
+from pyconfd.yang_parser import load_yang, YangSchemaRegistry
 from pyconfd.cdb import CDB
 from pyconfd.maapi import MAAPI
 from pyconfd.netconf_server import NetconfServer
+from pyconfd.netconf_ssh_server import NetconfSSHServer
 from pyconfd.ssh_server import SSHCLIServer
+from pyconfd.scenario import ScenarioMatcher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +73,12 @@ def main():
         print(f"  /dhcp 配下のノード:")
         for child in dhcp_node.data_children():
             print(f"    - {child.node_type.value}: {child.name}")
+
+    # YANG レジストリ構築 (NETCONF capability 告知用)
+    schema_registry = YangSchemaRegistry.from_dir(SCRIPT_DIR)
+    print(f"  capability URI:")
+    for uri in schema_registry.capability_uris():
+        print(f"    {uri}")
 
     # ------------------------------------------------------------------
     # 2. CDB 初期化
@@ -139,14 +147,44 @@ def main():
     # 6. NETCONF サーバー起動
     # ------------------------------------------------------------------
     step("6. NETCONF サーバー起動 (TCP port 2022)")
-    server = NetconfServer(cdb, host="127.0.0.1", port=2022)
+    # モックシナリオを読み込む (yaml がない場合は None)
+    mock_scenario_path = os.path.join(SCRIPT_DIR, "mock-scenarios.yaml")
+    scenario_matcher = None
+    if os.path.exists(mock_scenario_path):
+        try:
+            scenario_matcher = ScenarioMatcher.from_file(mock_scenario_path)
+            print(f"  モックシナリオをロードしました ({scenario_matcher.scenario_count} シナリオ):")
+            for name in scenario_matcher.scenario_names():
+                print(f"    - {name}")
+        except ImportError as e:
+            print(f"  警告: {e}")
+            print("  CDB フォールバックモードで動作します。")
+    server = NetconfServer(cdb, host="127.0.0.1", port=2022,
+                           schema_registry=schema_registry,
+                           scenario_matcher=scenario_matcher)
     server.start()
     time.sleep(0.2)
 
     # ------------------------------------------------------------------
-    # 6b. CLI サーバー起動
+    # 6b. NETCONF SSH サーバー起動 (RFC 6242, port 830)
     # ------------------------------------------------------------------
-    step("6b. CLI サーバー起動 (SSH port 2222, C-style)")
+    step("6b. NETCONF SSH サーバー起動 (SSH port 830, RFC 6242)")
+    netconf_ssh_server = NetconfSSHServer(
+        cdb,
+        host="127.0.0.1",
+        port=830,
+        users={"admin": "admin"},
+        host_key_path=os.path.join(SCRIPT_DIR, "pyconfd_netconf_host_key"),
+        schema_registry=schema_registry,
+        scenario_matcher=scenario_matcher,
+    )
+    netconf_ssh_server.start()
+    time.sleep(0.2)
+
+    # ------------------------------------------------------------------
+    # 6c. CLI サーバー起動
+    # ------------------------------------------------------------------
+    step("6c. CLI サーバー起動 (SSH port 2222, C-style)")
     cli_server = SSHCLIServer(cdb, host="127.0.0.1", port=2222, style="c", hostname="pyconfd",
                               users={"admin": "admin"}, schema=yang_root)
     cli_server.start()
@@ -163,19 +201,31 @@ def main():
     # ------------------------------------------------------------------
     step("完了")
     print("  NETCONF サーバーはポート 2022 で待機中です。")
+    print("  NETCONF SSH サーバーはポート 830 で待機中です。")
     print("  CLI サーバーはポート 2222 で待機中です。")
     print()
     print("  接続方法:")
-    print("    NETCONF : netcat 127.0.0.1 2022")
-    print("    CLI     : ssh -p 2222 admin@localhost")
+    print("    NETCONF (TCP)  : netcat 127.0.0.1 2022")
+    print("    NETCONF (SSH)  : ncclient / ansible_connection=netconf port=830")
+    print("    CLI            : ssh -p 2222 admin@localhost")
+    print()
+    print("  ncclient 接続例:")
+    print("    from ncclient import manager")
+    print("    m = manager.connect(host='127.0.0.1', port=830,")
+    print("                        username='admin', password='admin',")
+    print("                        hostkey_verify=False)")
     print()
     print("  Ctrl+C で終了します。")
+    if scenario_matcher:
+        print()
+        print("  モックシナリオ有効: dhcp フィルター付き get-config は固定 XML を返します")
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         pass
     server.stop()
+    netconf_ssh_server.stop()
     cli_server.stop()
     print("終了しました。")
 
